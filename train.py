@@ -12,7 +12,12 @@ from config import Config
 from loss import PixLoss, ClsLoss
 from dataset import MyData
 from models.birefnet import BiRefNet, BiRefNetC2F
-from utils import Logger, AverageMeter, set_seed, check_state_dict
+from utils import Logger, AverageMeter, set_seed, check_state_dict, WandbLogger
+from evaluation.metrics import SMeasure, MAEMeasure
+import numpy as np
+import cv2
+from PIL import Image
+import tempfile
 
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -25,6 +30,9 @@ parser.add_argument('--epochs', default=120, type=int)
 parser.add_argument('--ckpt_dir', default='ckpt/tmp', help='Temporary folder')
 parser.add_argument('--dist', default=False, type=lambda x: x == 'True')
 parser.add_argument('--use_accelerate', action='store_true', help='`accelerate launch --multi_gpu train.py --use_accelerate`. Use accelerate for training, good for FP16/BF16/...')
+parser.add_argument('--wandb', default=True, type=lambda x: x == 'True', help='Enable Weights & Biases logging')
+parser.add_argument('--wandb_project', default=None, type=str, help='W&B project name')
+parser.add_argument('--wandb_entity', default=None, type=str, help='W&B entity (team) name')
 args = parser.parse_args()
 
 config = Config()
@@ -64,6 +72,17 @@ os.makedirs(args.ckpt_dir, exist_ok=True)
 logger = Logger(os.path.join(args.ckpt_dir, "log.txt"))
 logger_loss_idx = 1
 
+# Initialize W&B logger
+# Override config settings with command-line arguments if provided
+if args.wandb is not None:
+    config.use_wandb = args.wandb
+if args.wandb_project is not None:
+    config.wandb_project = args.wandb_project
+if args.wandb_entity is not None:
+    config.wandb_entity = args.wandb_entity
+
+wandb_logger = WandbLogger(config, args)
+
 # log model and optimizer params
 # logger.info("Model details:"); logger.info(model)
 # if args.use_accelerate and accelerator.mixed_precision != 'no':
@@ -95,7 +114,17 @@ def init_data_loaders(to_be_distributed):
         config.batch_size, to_be_distributed=to_be_distributed, is_train=True
     )
     print(len(train_loader), "batches of train dataloader {} have been created.".format(config.training_set))
-    return train_loader
+    
+    # Create validation loader if validation is enabled
+    val_loader = None
+    if config.validate_during_training:
+        val_loader = prepare_dataloader(
+            MyData(datasets=config.validation_set, data_size=config.size, is_train=False),
+            config.batch_size_valid, to_be_distributed=to_be_distributed, is_train=False
+        )
+        print(len(val_loader), "batches of validation dataloader {} have been created.".format(config.validation_set))
+    
+    return train_loader, val_loader
 
 
 def init_models_optimizers(epochs, to_be_distributed):
@@ -145,9 +174,11 @@ class Trainer:
         self, data_loaders, model_opt_lrsch,
     ):
         self.model, self.optimizer, self.lr_scheduler = model_opt_lrsch
-        self.train_loader = data_loaders
+        self.train_loader, self.val_loader = data_loaders
         if args.use_accelerate:
             self.train_loader, self.model, self.optimizer = accelerator.prepare(self.train_loader, self.model, self.optimizer)
+            if self.val_loader is not None:
+                self.val_loader = accelerator.prepare(self.val_loader)
         if config.out_ref:
             self.criterion_gdt = nn.BCELoss()
 
@@ -157,6 +188,16 @@ class Trainer:
         
         # Others
         self.loss_log = AverageMeter()
+        
+        # Validation metrics
+        self.best_val_scores = {
+            'S-measure': 0.0,  # Higher is better
+            'MAE': float('inf'),  # Lower is better
+        }
+        self.best_epoch = {
+            'S-measure': 0,
+            'MAE': 0,
+        }
 
     def _train_batch(self, batch):
         if args.use_accelerate:
@@ -197,9 +238,11 @@ class Trainer:
         else:
             loss.backward()
         self.optimizer.step()
+        
+        # We'll add image logging in a future update
 
     def train_epoch(self, epoch):
-        global logger_loss_idx
+        global logger_loss_idx, wandb_logger
         self.model.train()
         self.loss_dict = {}
         if epoch > args.epochs + config.finetune_last_epochs:
@@ -216,18 +259,95 @@ class Trainer:
         for batch_idx, batch in enumerate(self.train_loader):
             # with nullcontext if not args.use_accelerate or accelerator.gradient_accumulation_steps <= 1 else accelerator.accumulate(self.model):
             self._train_batch(batch)
-            # Logger
+            
+            # Calculate global step for logging
+            global_step = (epoch - 1) * len(self.train_loader) + batch_idx
+            
+            # Log to W&B
             if batch_idx % 20 == 0:
+                # Log metrics to W&B
+                log_dict = {
+                    'epoch': epoch,
+                    'learning_rate': self.optimizer.param_groups[0]['lr'],
+                    'train/loss': self.loss_log.val,
+                }
+                # Add individual loss components
+                for loss_name, loss_value in self.loss_dict.items():
+                    log_dict[f'train/{loss_name}'] = loss_value
+                
+                wandb_logger.log(log_dict, step=global_step)
+                
+                # Console logging
                 info_progress = 'Epoch[{0}/{1}] Iter[{2}/{3}].'.format(epoch, args.epochs, batch_idx, len(self.train_loader))
                 info_loss = 'Training Losses'
                 for loss_name, loss_value in self.loss_dict.items():
                     info_loss += ', {}: {:.3f}'.format(loss_name, loss_value)
                 logger.info(' '.join((info_progress, info_loss)))
+                
+        # Log epoch summary
+        wandb_logger.log({
+            'epoch': epoch,
+            'train/epoch_loss': self.loss_log.avg,
+            'learning_rate': self.optimizer.param_groups[0]['lr'],
+        })
+        
         info_loss = '@==Final== Epoch[{0}/{1}]  Training Loss: {loss.avg:.3f}  '.format(epoch, args.epochs, loss=self.loss_log)
         logger.info(info_loss)
 
         self.lr_scheduler.step()
         return self.loss_log.avg
+    
+    def validate_epoch(self, epoch):
+        """Run validation on the validation dataset"""
+        if self.val_loader is None:
+            return {}
+            
+        self.model.eval()
+        
+        # Initialize metrics
+        metrics = {}
+        if 'S' in config.validation_metrics:
+            metrics['S'] = SMeasure()
+        if 'MAE' in config.validation_metrics:
+            metrics['MAE'] = MAEMeasure()
+        
+        # Process validation data
+        with torch.no_grad():
+            for batch in self.val_loader:
+                if args.use_accelerate:
+                    inputs = batch[0]
+                    gts = batch[1]
+                else:
+                    inputs = batch[0].to(device)
+                    gts = batch[1].to(device)
+                
+                # Get predictions
+                scaled_preds, _ = self.model(inputs)
+                if isinstance(scaled_preds, tuple) and config.out_ref:
+                    scaled_preds = scaled_preds[1]  # Extract actual predictions if output includes references
+                
+                # Get the final prediction
+                preds = scaled_preds[-1].sigmoid()  # Final prediction
+                
+                # Calculate metrics for each image in the batch
+                for i in range(preds.shape[0]):
+                    pred = preds[i, 0].cpu().numpy() * 255  # Convert to numpy and scale to 0-255
+                    gt = gts[i, 0].cpu().numpy() * 255
+                    
+                    # Apply metrics
+                    for metric_name, metric in metrics.items():
+                        metric.step(pred=pred, gt=gt)
+        
+        # Calculate final metrics
+        results = {}
+        for metric_name, metric in metrics.items():
+            if metric_name == 'S':
+                results['S-measure'] = metric.get_results()['sm']
+            elif metric_name == 'MAE':
+                results['MAE'] = metric.get_results()['mae']
+        
+        self.model.train()
+        return results
 
 
 def main():
@@ -239,6 +359,46 @@ def main():
 
     for epoch in range(epoch_st, args.epochs+1):
         train_loss = trainer.train_epoch(epoch)
+        
+        # Run validation if enabled and it's time to validate
+        if config.validate_during_training and trainer.val_loader is not None and epoch % config.validation_interval == 0:
+            val_metrics = trainer.validate_epoch(epoch)
+            
+            # Log validation metrics to W&B
+            val_log_dict = {'epoch': epoch}
+            for metric_name, metric_value in val_metrics.items():
+                val_log_dict[f'val/{metric_name}'] = metric_value
+            wandb_logger.log(val_log_dict)
+            
+            # Console logging
+            info_val = '@==Validation== Epoch[{0}/{1}] '.format(epoch, args.epochs)
+            for metric_name, metric_value in val_metrics.items():
+                info_val += '{}: {:.4f}  '.format(metric_name, metric_value)
+            logger.info(info_val)
+            
+            # Save best model for each metric
+            for metric_name, metric_value in val_metrics.items():
+                if metric_name in trainer.best_val_scores:
+                    is_better = False
+                    if metric_name == 'MAE':  # Lower is better
+                        if metric_value < trainer.best_val_scores[metric_name]:
+                            is_better = True
+                    else:  # Higher is better (S-measure)
+                        if metric_value > trainer.best_val_scores[metric_name]:
+                            is_better = True
+                            
+                    if is_better:
+                        trainer.best_val_scores[metric_name] = metric_value
+                        trainer.best_epoch[metric_name] = epoch
+                        
+                        # Save the best model
+                        if args.use_accelerate:
+                            if mixed_precision == 'fp16':
+                                state_dict = {k: v.half() for k, v in trainer.model.state_dict().items()}
+                        else:
+                            state_dict = trainer.model.module.state_dict() if to_be_distributed else trainer.model.state_dict()
+                        torch.save(state_dict, os.path.join(args.ckpt_dir, 'best_{}.pth'.format(metric_name)))
+        
         # Save checkpoint
         # DDP
         if epoch >= args.epochs - config.save_last and epoch % config.save_step == 0:
@@ -248,6 +408,23 @@ def main():
             else:
                 state_dict = trainer.model.module.state_dict() if to_be_distributed else trainer.model.state_dict()
             torch.save(state_dict, os.path.join(args.ckpt_dir, 'epoch_{}.pth'.format(epoch)))
+    
+    # Log best validation results
+    if config.validate_during_training and trainer.val_loader is not None:
+        logger.info('Best validation results:')
+        for metric_name, best_score in trainer.best_val_scores.items():
+            logger.info(f'Best {metric_name}: {best_score:.4f} (Epoch {trainer.best_epoch[metric_name]})')
+            
+        # Log best results to W&B
+        best_results = {}
+        for metric_name, best_score in trainer.best_val_scores.items():
+            best_results[f'val/best_{metric_name}'] = best_score
+            best_results[f'val/best_{metric_name}_epoch'] = trainer.best_epoch[metric_name]
+        wandb_logger.log(best_results)
+    
+    # Close W&B logging
+    wandb_logger.finish()
+    
     if to_be_distributed:
         destroy_process_group()
 

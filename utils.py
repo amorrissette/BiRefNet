@@ -6,6 +6,7 @@ import numpy as np
 import random
 import cv2
 from PIL import Image
+import wandb
 
 
 def path_to_image(path, size=(1024, 1024), color_type=['rgb', 'gray'][0]):
@@ -60,6 +61,59 @@ class Logger():
     def close(self):
         self.file_handler.close()
         self.stdout_handler.close()
+
+
+class WandbLogger:
+    """Logger for Weights & Biases"""
+    def __init__(self, config, args):
+        self.enabled = config.use_wandb
+        if not self.enabled:
+            return
+        
+        # Initialize W&B
+        wandb.init(
+            project=config.wandb_project,
+            entity=config.wandb_entity,
+            config={
+                # Training hyperparameters
+                "learning_rate": config.lr,
+                "epochs": args.epochs,
+                "batch_size": config.batch_size,
+                "optimizer": config.optimizer,
+                
+                # Model hyperparameters
+                "model": config.model,
+                "backbone": config.bb,
+                "task": config.task,
+                "image_size": config.size if not config.dynamic_size else "dynamic",
+                "grayscale_input": config.grayscale_input,
+                
+                # Other parameters
+                "training_set": config.training_set,
+                "compile": config.compile,
+                "precision_high": config.precisionHigh,
+                "distributed": args.dist,
+                "accelerate": args.use_accelerate,
+            }
+        )
+    
+    def log(self, data, step=None):
+        """Log metrics to W&B"""
+        if not self.enabled:
+            return
+        wandb.log(data, step=step)
+    
+    def log_image(self, image_name, image, step=None):
+        """Log an image to W&B"""
+        if not self.enabled:
+            return
+        wandb.log({image_name: wandb.Image(image)}, step=step)
+    
+    def finish(self):
+        """End the W&B run"""
+        if not self.enabled:
+            return
+        wandb.finish()
 
 
 class AverageMeter(object):
