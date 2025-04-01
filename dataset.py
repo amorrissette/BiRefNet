@@ -40,6 +40,7 @@ class MyData(data.Dataset):
         self.data_size = data_size
         self.load_all = config.load_all
         self.device = config.device
+        self.grayscale_input = config.grayscale_input
         valid_extensions = ['.png', '.jpg', '.PNG', '.JPG', '.JPEG']
 
         if self.is_train and config.auxiliary_classification:
@@ -81,7 +82,14 @@ class MyData(data.Dataset):
             self.class_labels_loaded = []
             # for image_path, label_path in zip(self.image_paths, self.label_paths):
             for image_path, label_path in tqdm(zip(self.image_paths, self.label_paths), total=len(self.image_paths)):
-                _image = path_to_image(image_path, size=self.data_size, color_type='rgb')
+                color_type = 'gray' if self.grayscale_input else 'rgb'
+                _image = path_to_image(image_path, size=self.data_size, color_type=color_type)
+                # If using grayscale but model expects RGB, duplicate the single channel to 3 channels
+                if self.grayscale_input:
+                    # Convert grayscale to 3-channel by duplicating the single channel
+                    _image_array = np.array(_image)
+                    _image_rgb = np.stack([_image_array, _image_array, _image_array], axis=2)
+                    _image = Image.fromarray(_image_rgb)
                 _label = path_to_image(label_path, size=self.data_size, color_type='gray')
                 self.images_loaded.append(_image)
                 self.labels_loaded.append(_label)
@@ -95,7 +103,14 @@ class MyData(data.Dataset):
             label = self.labels_loaded[index]
             class_label = self.class_labels_loaded[index] if self.is_train and config.auxiliary_classification else -1
         else:
-            image = path_to_image(self.image_paths[index], size=self.data_size, color_type='rgb')
+            color_type = 'gray' if self.grayscale_input else 'rgb'
+            image = path_to_image(self.image_paths[index], size=self.data_size, color_type=color_type)
+            # If using grayscale but model expects RGB, duplicate the single channel to 3 channels
+            if self.grayscale_input:
+                # Convert grayscale to 3-channel by duplicating the single channel
+                image_array = np.array(image)
+                image_rgb = np.stack([image_array, image_array, image_array], axis=2)
+                image = Image.fromarray(image_rgb)
             label = path_to_image(self.label_paths[index], size=self.data_size, color_type='gray')
             class_label = self.cls_name2id[self.label_paths[index].split('/')[-1].split('#')[3]] if self.is_train and config.auxiliary_classification else -1
 
@@ -159,6 +174,7 @@ def custom_collate_fn(batch):
     else:
         data_size = config.size
     new_batch = []
+    use_grayscale = config.grayscale_input
     transform_image = transforms.Compose([
         transforms.Resize(data_size[::-1]),
         transforms.ToTensor(),

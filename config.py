@@ -11,6 +11,9 @@ class Config():
 
         # TASK settings
         self.task = ['DIS5K', 'COD', 'HRSOD', 'General', 'General-2K', 'Matting'][0]
+        
+        # IMAGE settings
+        self.grayscale_input = False  # Whether to use grayscale input images
         self.testsets = {
             # Benchmarks
             'DIS5K': ','.join(['DIS-VD', 'DIS-TE1', 'DIS-TE2', 'DIS-TE3', 'DIS-TE4'][:1]),
