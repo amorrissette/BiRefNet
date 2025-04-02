@@ -19,6 +19,7 @@ class Config():
         
         # IMAGE settings
         self.grayscale_input = False  # Whether to use grayscale input images
+        self.num_output_channels = 1  # Number of segmentation output channels (default: 1)
         self.testsets = {
             # Benchmarks
             'DIS5K': ','.join(['DIS-VD', 'DIS-TE1', 'DIS-TE2', 'DIS-TE3', 'DIS-TE4'][:1]),

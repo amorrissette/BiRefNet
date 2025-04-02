@@ -154,12 +154,35 @@ class PixLoss(nn.Module):
     def forward(self, scaled_preds, gt):
         loss = 0.
         for _, pred_lvl in enumerate(scaled_preds):
-            if pred_lvl.shape != gt.shape:
+            if pred_lvl.shape[2:] != gt.shape[2:]:
                 pred_lvl = nn.functional.interpolate(pred_lvl, size=gt.shape[2:], mode='bilinear', align_corners=True)
-            for criterion_name, criterion in self.criterions_last.items():
-                _loss = criterion(pred_lvl.sigmoid(), gt) * self.lambdas_pix_last[criterion_name]
-                loss += _loss
-                # print(criterion_name, _loss.item())
+            
+            # For multi-channel output, we need to handle each channel
+            # If gt has only one channel but pred has multiple, we'll use the same gt for all channels
+            if pred_lvl.shape[1] > 1 and gt.shape[1] == 1:
+                # Handle multi-channel predictions with single-channel ground truth
+                for channel_idx in range(pred_lvl.shape[1]):
+                    pred_channel = pred_lvl[:, channel_idx:channel_idx+1, :, :]
+                    for criterion_name, criterion in self.criterions_last.items():
+                        _loss = criterion(pred_channel.sigmoid(), gt) * self.lambdas_pix_last[criterion_name]
+                        loss += _loss
+            else:
+                # Either both pred and gt are single-channel, or both are multi-channel with matching dimensions
+                # For the case where both have multiple matching channels
+                if pred_lvl.shape[1] > 1 and gt.shape[1] > 1:
+                    # Process each channel pair
+                    for channel_idx in range(min(pred_lvl.shape[1], gt.shape[1])):
+                        pred_channel = pred_lvl[:, channel_idx:channel_idx+1, :, :]
+                        gt_channel = gt[:, channel_idx:channel_idx+1, :, :]
+                        for criterion_name, criterion in self.criterions_last.items():
+                            _loss = criterion(pred_channel.sigmoid(), gt_channel) * self.lambdas_pix_last[criterion_name]
+                            loss += _loss
+                else:
+                    # Standard single-channel case
+                    for criterion_name, criterion in self.criterions_last.items():
+                        _loss = criterion(pred_lvl.sigmoid(), gt) * self.lambdas_pix_last[criterion_name]
+                        loss += _loss
+                
         return loss
 
 
