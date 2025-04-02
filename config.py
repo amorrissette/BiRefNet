@@ -8,6 +8,11 @@ class Config():
         # Make up your file system as: SYS_HOME_DIR/codes/dis/BiRefNet, SYS_HOME_DIR/datasets/dis/xx, SYS_HOME_DIR/weights/xx
         self.sys_home_dir = [os.path.expanduser('~'), '/mnt/data'][0]   # Default, custom
         self.data_root_dir = os.path.join(self.sys_home_dir, 'datasets/dis')
+        
+        # Weights & Biases settings
+        self.use_wandb = True                   # Whether to use W&B logging
+        self.wandb_project = "BiRefNet"         # W&B project name
+        self.wandb_entity = None                # W&B entity (team) name, set to None for default
 
         # TASK settings
         self.task = ['DIS5K', 'COD', 'HRSOD', 'General', 'General-2K', 'Matting'][0]
@@ -60,6 +65,17 @@ class Config():
 
         # TRAINING settings
         self.batch_size = 4
+        self.validate_during_training = True          # Whether to run validation during training
+        self.validation_interval = 1                   # Run validation every N epochs
+        self.validation_set = {                       # Which validation set to use during training
+            'DIS5K': 'DIS-TE1',                      # Use first test set for DIS5K
+            'COD': 'TE-CAMO',                        # Use first test set for COD
+            'HRSOD': 'DAVIS-S',                     # Use first test set for HRSOD
+            'General': 'DIS-VD',                     # Use first test set for General
+            'General-2K': 'DIS-VD',                  # Use first test set for General-2K
+            'Matting': 'TE-P3M-500-NP',             # Use first test set for Matting
+        }[self.task]
+        self.validation_metrics = ['S', 'MAE']        # Metrics to calculate during validation
         self.finetune_last_epochs = [
             0,
             {

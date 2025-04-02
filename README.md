@@ -279,6 +279,9 @@ Choose the one you like to try with clicks instead of codes:
 # PyTorch==2.5.1+CUDA12.4 (or 2.0.1+CUDA11.8) is used for faster training (~40%) with compilation.
 conda create -n birefnet python=3.10 -y && conda activate birefnet
 pip install -r requirements.txt
+
+# For Weights & Biases logging
+pip install wandb
 ```
 
 #### Dataset Preparation
@@ -298,6 +301,15 @@ Download backbone weights from [my google-drive folder](https://drive.google.com
 
 # See train.sh / test.sh for only training / test-evaluation.
 # After the evaluation, run `gen_best_ep.py` to select the best ckpt from a specific metric (you choose it from Sm, wFm, HCE (DIS only)).
+
+# To enable Weights & Biases logging (enabled by default in config.py)
+python train.py --ckpt_dir ckpt/your_experiment --wandb True
+
+# To disable Weights & Biases logging
+python train.py --ckpt_dir ckpt/your_experiment --wandb False
+
+# To specify W&B project and entity
+python train.py --ckpt_dir ckpt/your_experiment --wandb_project "your-project" --wandb_entity "your-username"
 ```
 
 ### :pen: Fine-tuning on Custom Data
