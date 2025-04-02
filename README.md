@@ -44,6 +44,7 @@ This repo is the official implementation of "[**Bilateral Reference for High-Res
 > **We need more GPU resources** to push forward the performance of BiRefNet, especially on *video* tasks and more *efficient* model designs on higher-resolution images. If you are happy to cooperate, please contact me at zhengpeng0108@gmail.com.
 
 ## News :newspaper:
+* **`Apr 2, 2025`:**  Added support for multiple output segmentation maps! You can now segment different aspects simultaneously (e.g., foreground + edges) by setting `num_output_channels` in config.
 * **`Feb 12, 2025`:**  We released the [BiRefNet_HR-matting](https://huggingface.co/ZhengPeng7/BiRefNet_HR-matting) for general matting use, which was trained on images in `2048x2048` and shows great matting performance on higher resolution images! Thanks again to [Freepik](https://www.freepik.com) their kind GPU support.
 * **`Feb 1, 2025`:**  We released the [BiRefNet_HR](https://huggingface.co/ZhengPeng7/BiRefNet_HR) for general use, which was trained on images in `2048x2048` and shows great performance on higher resolution images! Thanks to [Freepik](https://www.freepik.com) for offering H200x4 GPU for this huge training (~3 weeks).
 * **`Jan 6, 2025`:**  Validate the success of FP16 inference with ~0 decrease of performance and better efficiency: the standard BiRefNet can run in `17 FPS` with `resolution==1024x1024` with `3.45GB GPU memory` on a single `RTX 4090`. Check more details in the model efficiency part below in [model zoo section](https://github.com/ZhengPeng7/BiRefNet?tab=readme-ov-file#model-zoo).
@@ -393,6 +394,23 @@ Many of my thanks to the companies / institutes below.
 ```
 
 
+
+## Multi-Channel Segmentation Support
+
+BiRefNet now supports predicting multiple output segmentation maps. This is useful for applications where you need to segment different aspects of an image simultaneously. For example:
+- Foreground/background segmentation + edge detection
+- Multiple instance segmentation
+- Segmenting different parts of the same object
+
+To use multiple segmentation channels, simply set the `num_output_channels` parameter in your config:
+
+```python
+# In config.py or when initializing Config()
+config = Config()
+config.num_output_channels = 3  # For three output segmentation maps
+```
+
+When training with multiple output channels, the model will produce predictions with shape `[B, num_output_channels, H, W]`. The loss function has been updated to handle both single-channel and multi-channel ground truth.
 
 ## Contact
 

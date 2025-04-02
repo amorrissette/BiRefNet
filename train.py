@@ -331,8 +331,23 @@ class Trainer:
                 
                 # Calculate metrics for each image in the batch
                 for i in range(preds.shape[0]):
-                    pred = preds[i, 0].cpu().numpy() * 255  # Convert to numpy and scale to 0-255
-                    gt = gts[i, 0].cpu().numpy() * 255
+                    # For multi-channel predictions, we'll evaluate each channel separately
+                    # and use the first channel as the primary one for metrics
+                    num_channels = preds.shape[1]
+                    
+                    if num_channels > 1:
+                        # When we have multiple output channels, use the first channel for metrics
+                        # This can be customized based on how you want to evaluate multi-channel predictions
+                        pred = preds[i, 0].cpu().numpy() * 255  # Convert to numpy and scale to 0-255
+                    else:
+                        pred = preds[i, 0].cpu().numpy() * 255  # Convert to numpy and scale to 0-255
+                    
+                    # Use the appropriate ground truth channel
+                    if gts.shape[1] > 1 and gts.shape[1] >= num_channels:
+                        # If ground truth has multiple channels, use the corresponding one
+                        gt = gts[i, 0].cpu().numpy() * 255
+                    else:
+                        gt = gts[i, 0].cpu().numpy() * 255
                     
                     # Apply metrics
                     for metric_name, metric in metrics.items():
