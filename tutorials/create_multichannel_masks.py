@@ -30,7 +30,7 @@ def create_color_map(color_channel_map):
     
     return LinearSegmentedColormap.from_list("segmentation_cmap", colors, N=len(colors))
 
-def rgb_to_multi_channel(rgb_image, color_channel_map, num_channels):
+def rgb_to_multi_channel(rgb_image, color_channel_map, num_channels, color_tolerance=10):
     """
     Convert an RGB image to a multi-channel mask based on the color mapping.
     
@@ -38,6 +38,8 @@ def rgb_to_multi_channel(rgb_image, color_channel_map, num_channels):
         rgb_image: RGB PIL Image
         color_channel_map: Dict mapping RGB tuples to channel indices
         num_channels: Number of output channels
+        color_tolerance: Integer tolerance value for color matching.
+                        If >0, colors within this distance will match.
         
     Returns:
         numpy array with shape [num_channels, H, W]
@@ -53,9 +55,26 @@ def rgb_to_multi_channel(rgb_image, color_channel_map, num_channels):
     for (r, g, b), channel_idx in color_channel_map.items():
         if channel_idx >= num_channels:
             continue
+        
+        if color_tolerance > 0:
+            # Approximate color matching with tolerance
+            # Calculate distance for each channel
+            r_dist = np.abs(rgb_array[:, :, 0] - r)
+            g_dist = np.abs(rgb_array[:, :, 1] - g)
+            b_dist = np.abs(rgb_array[:, :, 2] - b)
             
-        # Create a mask where all RGB channels match the target color
-        color_mask = np.all(rgb_array == np.array([r, g, b]), axis=2)
+            # Color matches if each channel is within tolerance
+            r_match = (r_dist <= color_tolerance)
+            g_match = (g_dist <= color_tolerance)
+            b_match = (b_dist <= color_tolerance)
+            color_mask = r_match & g_match & b_match
+            
+            # Alternative: use Euclidean distance
+            # total_dist = np.sqrt(r_dist**2 + g_dist**2 + b_dist**2)
+            # color_mask = total_dist <= color_tolerance
+        else:
+            # Exact color matching
+            color_mask = np.all(rgb_array == np.array([r, g, b]), axis=2)
         
         # Set the corresponding channel to 1 where the color matches
         multi_channel[channel_idx][color_mask] = 1.0
@@ -131,6 +150,8 @@ def main():
     parser = argparse.ArgumentParser(description="Convert RGB label images to multi-channel segmentation masks")
     parser.add_argument('--input', required=True, help='Path to input RGB label image')
     parser.add_argument('--output_dir', default='./output', help='Directory to save outputs')
+    parser.add_argument('--tolerance', type=int, default=10, 
+                        help='Color tolerance for matching (0 for exact matching)')
     args = parser.parse_args()
     
     # Example color channel mapping
@@ -147,8 +168,8 @@ def main():
     # Load the input image
     image = Image.open(args.input).convert('RGB')
     
-    # Convert to multi-channel
-    multi_channel = rgb_to_multi_channel(image, color_channel_map, num_channels)
+    # Convert to multi-channel with specified tolerance
+    multi_channel = rgb_to_multi_channel(image, color_channel_map, num_channels, args.tolerance)
     
     # Visualize individual channels
     visualize_channels(multi_channel, os.path.join(args.output_dir, 'channels.png'))

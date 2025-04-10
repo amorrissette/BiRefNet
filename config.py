@@ -23,6 +23,7 @@ class Config():
         self.rgb_labels = False       # Whether to use RGB label images (instead of grayscale)
         self.color_channel_map = {}   # Dict mapping RGB colors to output channels (if rgb_labels=True)
                                       # Format: {(R,G,B): channel_index, ...}, where channel_index is 0-based
+        self.color_tolerance = 10     # Tolerance for matching colors in RGB labels (0 for exact matching)
         self.testsets = {
             # Benchmarks
             'DIS5K': ','.join(['DIS-VD', 'DIS-TE1', 'DIS-TE2', 'DIS-TE3', 'DIS-TE4'][:1]),

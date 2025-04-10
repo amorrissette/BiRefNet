@@ -34,6 +34,9 @@ config.color_channel_map = {
     (0, 255, 0): 1,    # Green pixels go to channel 1 (edges)
     (0, 0, 255): 2,    # Blue pixels go to channel 2 (other feature)
 }
+
+# Set color tolerance for approximate matching (0 for exact matching)
+config.color_tolerance = 10    # Colors within 10 units of target RGB values will match
 ```
 
 ## Dataset Preparation
@@ -97,6 +100,21 @@ other_feature = outputs[0, 2].cpu().numpy()    # Channel 2
 3. **Loss function**: The loss function has been updated to support both multi-channel and single-channel ground truth.
 
 4. **Performance**: Computing multiple segmentation maps may require more GPU memory and training time.
+
+## Approximate Color Matching
+
+The system supports approximate color matching to handle small variations in RGB values:
+
+- Set `config.color_tolerance` to a positive integer (default: 10) to enable approximate matching
+- Colors within the specified distance will be assigned to the corresponding channel
+- This makes the system more robust to JPEG compression artifacts and anti-aliasing effects
+- Use a smaller tolerance (or 0) for exact color matching when precision is required
+
+For example, with `color_tolerance = 10`:
+- RGB value (255, 0, 0) will match pixels with R between 245-255, G between 0-10, and B between 0-10
+- This helps with slightly varying colors at object boundaries or from image compression
+
+You can adjust this value based on your dataset characteristics - higher for more tolerance, lower for stricter matching.
 
 ## Compatibility
 

@@ -50,6 +50,7 @@ class MyData(data.Dataset):
         self.rgb_labels = config.rgb_labels
         self.color_channel_map = config.color_channel_map
         self.num_output_channels = config.num_output_channels
+        self.color_tolerance = config.color_tolerance
         valid_extensions = ['.png', '.jpg', '.PNG', '.JPG', '.JPEG']
 
         if self.is_train and config.auxiliary_classification:
@@ -207,8 +208,8 @@ class MyData(data.Dataset):
                 if self.rgb_labels and self.color_channel_map:
                     # First convert to tensor
                     label_tensor = self.transform_rgb_label(label)
-                    # Then convert RGB tensor to multi-channel
-                    label = self.rgb_to_multi_channel(label_tensor)
+                    # Then convert RGB tensor to multi-channel with configured tolerance
+                    label = self.rgb_to_multi_channel(label_tensor, self.color_tolerance)
                 else:
                     # Standard grayscale label processing
                     label = self.transform_label(label)
@@ -224,8 +225,8 @@ class MyData(data.Dataset):
             if self.rgb_labels and self.color_channel_map:
                 # First convert to tensor
                 label_tensor = self.transform_rgb_label(label)
-                # Then convert RGB tensor to multi-channel
-                label = self.rgb_to_multi_channel(label_tensor)
+                # Then convert RGB tensor to multi-channel with configured tolerance
+                label = self.rgb_to_multi_channel(label_tensor, self.color_tolerance)
             else:
                 # Standard grayscale label processing
                 label = self.transform_label(label)
@@ -238,12 +239,14 @@ class MyData(data.Dataset):
     def __len__(self):
         return len(self.image_paths)
     
-    def rgb_to_multi_channel(self, rgb_label):
+    def rgb_to_multi_channel(self, rgb_label, color_tolerance=10):
         """
         Convert an RGB label tensor to a multi-channel tensor based on color mapping.
         
         Args:
             rgb_label: RGB tensor with shape [3, H, W] and values in range [0, 1]
+            color_tolerance: Integer tolerance value for color matching. 
+                             If >0, colors within this distance will match.
             
         Returns:
             Multi-channel tensor with shape [num_output_channels, H, W] where each channel
@@ -267,11 +270,27 @@ class MyData(data.Dataset):
             # Check if channel index is valid
             if channel_idx >= self.num_output_channels:
                 continue
+            
+            if color_tolerance > 0:
+                # Approximate color matching with tolerance
+                r_dist = torch.abs(rgb_values[0] - r)
+                g_dist = torch.abs(rgb_values[1] - g)
+                b_dist = torch.abs(rgb_values[2] - b)
                 
-            # Create a mask where all three RGB channels match the target color
-            r_match = (rgb_values[0] == r)
-            g_match = (rgb_values[1] == g)
-            b_match = (rgb_values[2] == b)
+                # Color matches if each channel is within tolerance
+                r_match = (r_dist <= color_tolerance)
+                g_match = (g_dist <= color_tolerance)
+                b_match = (b_dist <= color_tolerance)
+                
+                # Or use a combined distance metric (Euclidean distance)
+                # total_dist = torch.sqrt(r_dist.float().pow(2) + g_dist.float().pow(2) + b_dist.float().pow(2))
+                # color_mask = (total_dist <= color_tolerance)
+            else:
+                # Exact color matching
+                r_match = (rgb_values[0] == r)
+                g_match = (rgb_values[1] == g)
+                b_match = (rgb_values[2] == b)
+            
             color_mask = r_match & g_match & b_match
             
             # Set the corresponding channel to 1 where the color matches
