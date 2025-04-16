@@ -15,7 +15,7 @@ class Config():
         self.wandb_entity = None                # W&B entity (team) name, set to None for default
 
         # TASK settings
-        self.task = ['DIS5K', 'COD', 'HRSOD', 'General', 'General-2K', 'Matting'][0]
+        self.task = ['Human','DIS5K', 'COD', 'HRSOD', 'General', 'General-2K', 'Matting'][0]
         
         # IMAGE settings
         self.grayscale_input = False  # Whether to use grayscale input images
@@ -26,6 +26,7 @@ class Config():
         self.color_tolerance = 10     # Tolerance for matching colors in RGB labels (0 for exact matching)
         self.testsets = {
             # Benchmarks
+            'Human': ','.join(['Human-TE']),
             'DIS5K': ','.join(['DIS-VD', 'DIS-TE1', 'DIS-TE2', 'DIS-TE3', 'DIS-TE4'][:1]),
             'COD': ','.join(['CHAMELEON', 'NC4K', 'TE-CAMO', 'TE-COD10K']),
             'HRSOD': ','.join(['DAVIS-S', 'TE-HRSOD', 'TE-UHRSD', 'DUT-OMRON', 'TE-DUTS']),
@@ -36,6 +37,7 @@ class Config():
         }[self.task]
         datasets_all = '+'.join([ds for ds in (os.listdir(os.path.join(self.data_root_dir, self.task)) if os.path.isdir(os.path.join(self.data_root_dir, self.task)) else []) if ds not in self.testsets.split(',')])
         self.training_set = {
+            'Human': ['Human-TR'],
             'DIS5K': ['DIS-TR', 'DIS-TR+DIS-TE1+DIS-TE2+DIS-TE3+DIS-TE4'][0],
             'COD': 'TR-COD10K+TR-CAMO',
             'HRSOD': ['TR-DUTS', 'TR-HRSOD', 'TR-UHRSD', 'TR-DUTS+TR-HRSOD', 'TR-DUTS+TR-UHRSD', 'TR-HRSOD+TR-UHRSD', 'TR-DUTS+TR-HRSOD+TR-UHRSD'][5],
@@ -199,7 +201,7 @@ class Config():
         self.SDPA_enabled = False    # Bugs. Slower and errors occur in multi-GPUs
 
         # others
-        self.device = [0, 'cpu'][0]     # .to(0) == .to('cuda:0')
+        self.device = [0, 'cpu'][1]     # .to(0) == .to('cuda:0')
 
         self.batch_size_valid = 1
         self.rand_seed = 7
