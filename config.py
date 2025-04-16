@@ -10,21 +10,22 @@ class Config():
         self.data_root_dir = os.path.join(self.sys_home_dir, 'datasets/dis')
         
         # Weights & Biases settings
-        self.use_wandb = True                   # Whether to use W&B logging
-        self.wandb_project = "BiRefNet"         # W&B project name
+        self.use_wandb = False                   # Whether to use W&B logging
+        self.wandb_project = "BiRefNet-Thermal" # W&B project name
         self.wandb_entity = None                # W&B entity (team) name, set to None for default
 
         # TASK settings
-        self.task = ['DIS5K', 'COD', 'HRSOD', 'General', 'General-2K', 'Matting'][0]
+        self.task = ['Thermal', 'DIS5K', 'COD', 'HRSOD', 'General', 'General-2K', 'Matting'][0]
         
         # IMAGE settings
-        self.grayscale_input = False  # Whether to use grayscale input images
+        self.grayscale_input = True  # Whether to use grayscale input images
         self.num_output_channels = 1  # Number of segmentation output channels (default: 1)
         self.rgb_labels = False       # Whether to use RGB label images (instead of grayscale)
         self.color_channel_map = {}   # Dict mapping RGB colors to output channels (if rgb_labels=True)
                                       # Format: {(R,G,B): channel_index, ...}, where channel_index is 0-based
         self.color_tolerance = 10     # Tolerance for matching colors in RGB labels (0 for exact matching)
         self.testsets = {
+            'Thermal': 'Thermal-TE',
             # Benchmarks
             'DIS5K': ','.join(['DIS-VD', 'DIS-TE1', 'DIS-TE2', 'DIS-TE3', 'DIS-TE4'][:1]),
             'COD': ','.join(['CHAMELEON', 'NC4K', 'TE-CAMO', 'TE-COD10K']),
@@ -36,6 +37,7 @@ class Config():
         }[self.task]
         datasets_all = '+'.join([ds for ds in (os.listdir(os.path.join(self.data_root_dir, self.task)) if os.path.isdir(os.path.join(self.data_root_dir, self.task)) else []) if ds not in self.testsets.split(',')])
         self.training_set = {
+            'Thermal': 'Thermal-TR',
             'DIS5K': ['DIS-TR', 'DIS-TR+DIS-TE1+DIS-TE2+DIS-TE3+DIS-TE4'][0],
             'COD': 'TR-COD10K+TR-CAMO',
             'HRSOD': ['TR-DUTS', 'TR-HRSOD', 'TR-UHRSD', 'TR-DUTS+TR-HRSOD', 'TR-DUTS+TR-UHRSD', 'TR-HRSOD+TR-UHRSD', 'TR-DUTS+TR-HRSOD+TR-UHRSD'][5],
@@ -50,8 +52,8 @@ class Config():
         self.background_color_synthesis = False             # whether to use pure bg color to replace the original backgrounds.
 
         # Faster-Training settings
-        self.load_all = False and self.dynamic_size is None   # Turn it on/off by your case. It may consume a lot of CPU memory. And for multi-GPU (N), it would cost N times the CPU memory to load the data.
-        self.compile = True                             # 1. Trigger CPU memory leak in some extend, which is an inherent problem of PyTorch.
+        self.load_all = True and self.dynamic_size is None   # Turn it on/off by your case. It may consume a lot of CPU memory. And for multi-GPU (N), it would cost N times the CPU memory to load the data.
+        self.compile = False                             # 1. Trigger CPU memory leak in some extend, which is an inherent problem of PyTorch.
                                                         #   Machines with > 70GB CPU memory can run the whole training on DIS5K with default setting.
                                                         # 2. Higher PyTorch version may fix it: https://github.com/pytorch/pytorch/issues/119607.
                                                         # 3. But compile in 2.0.1 < Pytorch < 2.5.0 seems to bring no acceleration for training.
@@ -69,10 +71,11 @@ class Config():
         self.dec_blk = ['BasicDecBlk', 'ResBlk'][0]
 
         # TRAINING settings
-        self.batch_size = 4
+        self.batch_size = 2
         self.validate_during_training = True          # Whether to run validation during training
         self.validation_interval = 1                   # Run validation every N epochs
         self.validation_set = {                       # Which validation set to use during training
+            'Thermal': 'Thermal-TE',
             'DIS5K': 'DIS-TE1',                      # Use first test set for DIS5K
             'COD': 'TE-CAMO',                        # Use first test set for COD
             'HRSOD': 'DAVIS-S',                     # Use first test set for HRSOD
@@ -84,6 +87,7 @@ class Config():
         self.finetune_last_epochs = [
             0,
             {
+                'Thermal': -20,
                 'DIS5K': -40,
                 'COD': -20,
                 'HRSOD': -20,
@@ -102,7 +106,7 @@ class Config():
             'swin_v1_b', 'swin_v1_l',               # 5-bs9, 6-bs4
             'pvt_v2_b0', 'pvt_v2_b1',               # 7, 8
             'pvt_v2_b2', 'pvt_v2_b5',               # 9-bs10, 10-bs5
-        ][6]
+        ][3]
         self.lateral_channels_in_collection = {
             'vgg16': [512, 256, 128, 64], 'vgg16bn': [512, 256, 128, 64], 'resnet50': [1024, 512, 256, 64],
             'pvt_v2_b2': [512, 320, 128, 64], 'pvt_v2_b5': [512, 320, 128, 64],
@@ -203,12 +207,13 @@ class Config():
 
         self.batch_size_valid = 1
         self.rand_seed = 7
-        run_sh_file = [f for f in os.listdir('.') if 'train.sh' == f] + [os.path.join('..', f) for f in os.listdir('..') if 'train.sh' == f]
-        if run_sh_file:
-            with open(run_sh_file[0], 'r') as f:
-                lines = f.readlines()
-                self.save_last = int([l.strip() for l in lines if "'{}')".format(self.task) in l and 'val_last=' in l][0].split('val_last=')[-1].split()[0])
-                self.save_step = int([l.strip() for l in lines if "'{}')".format(self.task) in l and 'step=' in l][0].split('step=')[-1].split()[0])
+        # run_sh_file = [f for f in os.listdir('.') if 'train.sh' == f] + [os.path.join('..', f) for f in os.listdir('..') if 'train.sh' == f]
+        # print(run_sh_file)
+        # if run_sh_file:
+        #     with open(run_sh_file[0], 'r') as f:
+        #         lines = f.readlines()
+        #         self.save_last = int([l.strip() for l in lines if "'{}')".format(self.task) in l and 'val_last=' in l][0].split('val_last=')[-1].split()[0])
+        #         self.save_step = int([l.strip() for l in lines if "'{}')".format(self.task) in l and 'step=' in l][0].split('step=')[-1].split()[0])
 
 
 # Return task for choosing settings in shell scripts.

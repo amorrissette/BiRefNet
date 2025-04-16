@@ -6,6 +6,7 @@ from tqdm import tqdm
 from PIL import Image
 from torch.utils import data
 from torchvision import transforms
+import torch 
 
 from image_proc import preproc
 from config import Config
@@ -77,8 +78,13 @@ class MyData(data.Dataset):
         self.label_paths = []
         for p in self.image_paths:
             for ext in valid_extensions:
-                ## 'im' and 'gt' may need modifying
-                p_gt = p.replace('/im/', '/gt/')[:-(len(p.split('.')[-1])+1)] + ext
+                if p.endswith('thermal.png'):
+                    # Special case for thermal images - use thermal-tsc.png for the mask
+                    p_gt = p.replace('/im/', '/gt/').replace('thermal.png', 'thermal-tsc.png')
+                else:
+                    # Regular case - just replace the extension
+                    p_gt = p.replace('/im/', '/gt/')[:-(len(p.split('.')[-1])+1)] + ext
+                
                 file_exists = False
                 if os.path.exists(p_gt):
                     self.label_paths.append(p_gt)
