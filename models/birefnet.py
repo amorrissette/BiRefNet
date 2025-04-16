@@ -154,16 +154,19 @@ class Decoder(nn.Module):
         self.decoder_block3 = DecoderBlock(channels[1]+([N_dec_ipt, channels[0]//8][ipt_cha_opt] if self.config.dec_ipt else 0), channels[2])
         self.decoder_block2 = DecoderBlock(channels[2]+([N_dec_ipt, channels[1]//8][ipt_cha_opt] if self.config.dec_ipt else 0), channels[3])
         self.decoder_block1 = DecoderBlock(channels[3]+([N_dec_ipt, channels[2]//8][ipt_cha_opt] if self.config.dec_ipt else 0), channels[3]//2)
-        self.conv_out1 = nn.Sequential(nn.Conv2d(channels[3]//2+([N_dec_ipt, channels[3]//8][ipt_cha_opt] if self.config.dec_ipt else 0), 1, 1, 1, 0))
+        # Get number of output channels from config
+        self.num_output_channels = self.config.num_output_channels
+        self.conv_out1 = nn.Sequential(nn.Conv2d(channels[3]//2+([N_dec_ipt, channels[3]//8][ipt_cha_opt] if self.config.dec_ipt else 0), self.num_output_channels, 1, 1, 0))
 
         self.lateral_block4 = LateralBlock(channels[1], channels[1])
         self.lateral_block3 = LateralBlock(channels[2], channels[2])
         self.lateral_block2 = LateralBlock(channels[3], channels[3])
 
         if self.config.ms_supervision:
-            self.conv_ms_spvn_4 = nn.Conv2d(channels[1], 1, 1, 1, 0)
-            self.conv_ms_spvn_3 = nn.Conv2d(channels[2], 1, 1, 1, 0)
-            self.conv_ms_spvn_2 = nn.Conv2d(channels[3], 1, 1, 1, 0)
+            # Use num_output_channels for multi-scale supervision too
+            self.conv_ms_spvn_4 = nn.Conv2d(channels[1], self.num_output_channels, 1, 1, 0)
+            self.conv_ms_spvn_3 = nn.Conv2d(channels[2], self.num_output_channels, 1, 1, 0)
+            self.conv_ms_spvn_2 = nn.Conv2d(channels[3], self.num_output_channels, 1, 1, 0)
 
             if self.config.out_ref:
                 _N = 16
@@ -171,9 +174,9 @@ class Decoder(nn.Module):
                 self.gdt_convs_3 = nn.Sequential(nn.Conv2d(channels[2], _N, 3, 1, 1), nn.BatchNorm2d(_N) if self.config.batch_size > 1 else nn.Identity(), nn.ReLU(inplace=True))
                 self.gdt_convs_2 = nn.Sequential(nn.Conv2d(channels[3], _N, 3, 1, 1), nn.BatchNorm2d(_N) if self.config.batch_size > 1 else nn.Identity(), nn.ReLU(inplace=True))
 
-                self.gdt_convs_pred_4 = nn.Sequential(nn.Conv2d(_N, 1, 1, 1, 0))
-                self.gdt_convs_pred_3 = nn.Sequential(nn.Conv2d(_N, 1, 1, 1, 0))
-                self.gdt_convs_pred_2 = nn.Sequential(nn.Conv2d(_N, 1, 1, 1, 0))
+                self.gdt_convs_pred_4 = nn.Sequential(nn.Conv2d(_N, self.num_output_channels, 1, 1, 0))
+                self.gdt_convs_pred_3 = nn.Sequential(nn.Conv2d(_N, self.num_output_channels, 1, 1, 0))
+                self.gdt_convs_pred_2 = nn.Sequential(nn.Conv2d(_N, self.num_output_channels, 1, 1, 0))
                 
                 self.gdt_convs_attn_4 = nn.Sequential(nn.Conv2d(_N, 1, 1, 1, 0))
                 self.gdt_convs_attn_3 = nn.Sequential(nn.Conv2d(_N, 1, 1, 1, 0))
@@ -304,8 +307,15 @@ class BiRefNetC2F(
         self.grid = 4
         self.model_coarse = BiRefNet(bb_pretrained=True)
         self.model_fine = BiRefNet(bb_pretrained=True)
-        self.input_mixer = nn.Conv2d(4, 3, 1, 1, 0)
-        self.output_mixer_merge_post = nn.Sequential(nn.Conv2d(1, 16, 3, 1, 1), nn.Conv2d(16, 1, 3, 1, 1))
+        # For multi-channel outputs, we need to adjust the input mixer
+        # Keep 3 input image channels + N output channels from coarse model
+        self.num_output_channels = self.config.num_output_channels
+        self.input_mixer = nn.Conv2d(3 + self.num_output_channels, 3, 1, 1, 0)
+        # Also adjust the output mixer to handle multi-channel predictions
+        self.output_mixer_merge_post = nn.Sequential(
+            nn.Conv2d(self.num_output_channels, 16, 3, 1, 1), 
+            nn.Conv2d(16, self.num_output_channels, 3, 1, 1)
+        )
 
     def forward(self, x):
         x_ori = x.clone()
