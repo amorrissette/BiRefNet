@@ -7,6 +7,8 @@ from PIL import Image
 from torch.utils import data
 from torchvision import transforms
 import torch 
+import json
+import math
 
 from image_proc import preproc
 from config import Config
@@ -15,6 +17,97 @@ from utils import path_to_image
 
 Image.MAX_IMAGE_PIXELS = None       # remove DecompressionBombWarning
 config = Config()
+
+def generate_heatmap_from_json(json_path, size=None, sigma_factor=None):
+    """
+    Generate a heatmap based on thermal points from a JSON file using Gaussian falloff.
+    
+    Args:
+        json_path: Path to the JSON file containing thermal point data
+        size: Optional tuple (width, height) to resize the heatmap
+        sigma_factor: Override sigma factor from config (controls the spread of the Gaussian)
+        
+    Returns:
+        PIL Image containing the heatmap with values from 0 to 255
+    """
+    try:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+            
+        # Get image dimensions
+        if 'image_size' in data:
+            width, height = data['image_size']
+        else:
+            width, height = data.get('width', 640), data.get('height', 480)
+            
+        # Create blank heatmap
+        heatmap = np.zeros((height, width), dtype=np.float32)
+        
+        # Process points or circles
+        points = []
+        if 'circles' in data:
+            for circle in data['circles']:
+                center = circle['center']
+                radius = circle['radius']
+                # Default intensity is 1.0 if not specified
+                intensity = circle.get('intensity', 1.0)
+                points.append((center[0], center[1], radius, intensity))
+        elif 'points' in data:
+            for point in data['points']:
+                x = point['x']
+                y = point['y']
+                radius = point['radius']
+                intensity = point.get('intensity', 1.0)
+                points.append((x, y, radius, intensity))
+                
+        # Generate the heatmap using radial falloff
+        y_indices, x_indices = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
+        
+        # Use provided sigma factor or fall back to config
+        current_sigma_factor = sigma_factor if sigma_factor is not None else config.heatmap_sigma_factor
+        
+        for x, y, radius, intensity in points:
+            # Calculate squared distances from each point to the center
+            squared_distances = (x_indices - x)**2 + (y_indices - y)**2
+            
+            # Apply a function that reaches exactly 0 at the radius
+            # Use a quadratic falloff: intensity * (1 - (distance/radius)^2) for points inside radius
+            # This ensures value is exactly 0 at the radius boundary
+            falloff = np.zeros((height, width), dtype=np.float32)
+            mask = squared_distances <= radius**2  # Only consider points within the radius
+            
+            if np.any(mask):  # Check if any points are within radius
+                # Calculate normalized distances (0 at center, 1 at radius)
+                normalized_dist = np.sqrt(squared_distances[mask]) / radius
+                
+                # Use Gaussian falloff (the only option now)
+                # A sharper Gaussian falloff
+                sigma = radius * current_sigma_factor
+                # Make the Gaussian approach 0 at the radius
+                falloff[mask] = intensity * np.exp(-(normalized_dist * radius)**2 / (2 * sigma**2))
+            
+            # Add to the heatmap (using maximum for overlapping points)
+            heatmap = np.maximum(heatmap, falloff)
+            
+        # Normalize to [0, 1]
+        heatmap = np.clip(heatmap, 0, 1)
+        
+        # Convert to PIL Image
+        heatmap_image = Image.fromarray((heatmap * 255).astype(np.uint8))
+        
+        # Resize if needed
+        if size is not None:
+            heatmap_image = heatmap_image.resize(size, Image.BILINEAR)
+            
+        return heatmap_image
+    
+    except Exception as e:
+        print(f"Error generating heatmap from JSON {json_path}: {e}")
+        # Return a blank image as fallback
+        if size is None:
+            size = (width, height)
+        return Image.new('L', size, 0)
+
 _class_labels_TR_sorted = (
     'Airplane, Ant, Antenna, Archery, Axe, BabyCarriage, Bag, BalanceBeam, Balcony, Balloon, Basket, BasketballHoop, Beatle, Bed, Bee, Bench, Bicycle, '
     'BicycleFrame, BicycleStand, Boat, Bonsai, BoomLift, Bridge, BunkBed, Butterfly, Button, Cable, CableLift, Cage, Camcorder, Cannon, Canoe, Car, '
@@ -77,15 +170,25 @@ class MyData(data.Dataset):
             self.image_paths += [os.path.join(image_root, p) for p in os.listdir(image_root) if any(p.endswith(ext) for ext in valid_extensions)]
         self.label_paths = []
         for p in self.image_paths:
+            file_exists = False
+            
+            if p.endswith('thermal.png') and config.use_thermal_json:
+                # Check for thermal JSON files first
+                json_path = p.replace('/im/', '/gt/').replace('thermal.png', 'thermal-tsc.json')
+                if os.path.exists(json_path):
+                    self.label_paths.append(json_path)
+                    file_exists = True
+                    continue
+                    
+            # Try regular image extensions or fallback for thermal images
             for ext in valid_extensions:
                 if p.endswith('thermal.png'):
-                    # Special case for thermal images - use thermal-tsc.png for the mask
+                    # Fallback to thermal-tsc.png if JSON not found
                     p_gt = p.replace('/im/', '/gt/').replace('thermal.png', 'thermal-tsc.png')
                 else:
                     # Regular case - just replace the extension
                     p_gt = p.replace('/im/', '/gt/')[:-(len(p.split('.')[-1])+1)] + ext
                 
-                file_exists = False
                 if os.path.exists(p_gt):
                     self.label_paths.append(p_gt)
                     file_exists = True
@@ -113,15 +216,29 @@ class MyData(data.Dataset):
                     _image_rgb = np.stack([_image_array, _image_array, _image_array], axis=2)
                     _image = Image.fromarray(_image_rgb)
                 
-                # Load label as RGB or grayscale based on config
-                label_color_type = 'rgb' if self.rgb_labels else 'gray'
-                _label = path_to_image(label_path, size=self.data_size, color_type=label_color_type)
+                # Check if this is a JSON file for thermal heatmap generation
+                if label_path.endswith('.json') and config.use_thermal_json:
+                    # Generate heatmap from JSON
+                    _label = generate_heatmap_from_json(label_path, size=self.data_size)
+                else:
+                    # Load label as RGB or grayscale based on config
+                    label_color_type = 'rgb' if self.rgb_labels else 'gray'
+                    _label = path_to_image(label_path, size=self.data_size, color_type=label_color_type)
                 
                 self.images_loaded.append(_image)
                 self.labels_loaded.append(_label)
-                self.class_labels_loaded.append(
-                    self.cls_name2id[label_path.split('/')[-1].split('#')[3]] if self.is_train and config.auxiliary_classification else -1
-                )
+                
+                # Handle class label for auxiliary classification
+                if self.is_train and config.auxiliary_classification:
+                    try:
+                        class_label = self.cls_name2id[label_path.split('/')[-1].split('#')[3]]
+                    except (IndexError, KeyError):
+                        # For thermal JSON files or other files without the expected format
+                        class_label = -1
+                else:
+                    class_label = -1
+                    
+                self.class_labels_loaded.append(class_label)
 
     def __getitem__(self, index):
         if self.load_all:
@@ -139,10 +256,26 @@ class MyData(data.Dataset):
                 image = Image.fromarray(image_rgb)
             
             # Load label as RGB or grayscale based on config
-            label_color_type = 'rgb' if self.rgb_labels else 'gray'
-            label = path_to_image(self.label_paths[index], size=self.data_size, color_type=label_color_type)
+            label_path = self.label_paths[index]
             
-            class_label = self.cls_name2id[self.label_paths[index].split('/')[-1].split('#')[3]] if self.is_train and config.auxiliary_classification else -1
+            # Check if this is a JSON file for thermal heatmap generation
+            if label_path.endswith('.json') and config.use_thermal_json:
+                # Generate heatmap from JSON
+                label = generate_heatmap_from_json(label_path, size=self.data_size)
+            else:
+                # Load label as RGB or grayscale based on config
+                label_color_type = 'rgb' if self.rgb_labels else 'gray'
+                label = path_to_image(label_path, size=self.data_size, color_type=label_color_type)
+            
+            # Handle class label for auxiliary classification
+            if self.is_train and config.auxiliary_classification:
+                try:
+                    class_label = self.cls_name2id[label_path.split('/')[-1].split('#')[3]]
+                except (IndexError, KeyError):
+                    # For thermal JSON files or other files without the expected format
+                    class_label = -1
+            else:
+                class_label = -1
 
         # loading image and label (this must be done before label tensor conversion)
         if self.is_train:
@@ -313,39 +446,50 @@ def custom_collate_fn(batch):
     else:
         data_size = config.size
     new_batch = []
-    use_grayscale = config.grayscale_input
-    transform_image = transforms.Compose([
-        transforms.Resize(data_size[::-1]),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ])
-    transform_label = transforms.Compose([
-        transforms.Resize(data_size[::-1]),
-        transforms.ToTensor(),
-    ])
-    
-    # Create a dataset instance to use its rgb_to_multi_channel method
-    rgb_labels = config.rgb_labels
-    color_channel_map = config.color_channel_map
-    num_output_channels = config.num_output_channels
     
     for image, label, class_label in batch:
-        # Check if the label is already a tensor (processed) or not
-        if isinstance(label, torch.Tensor):
-            # Label was already processed during __getitem__
-            # Just resize it if needed
+        # Both image and label are already tensors from __getitem__
+        
+        # Only resize if the size doesn't match
+        if isinstance(image, torch.Tensor) and isinstance(label, torch.Tensor):
+            # Both are already tensors
             if label.shape[-2:] != tuple(data_size[::-1]):
-                # For multi-channel labels, handle resizing for each channel
+                # Resize the label tensor if needed
                 resized_label = torch.nn.functional.interpolate(
-                    label.unsqueeze(0), 
+                    label.unsqueeze(0) if label.dim() == 2 else label.unsqueeze(0), 
                     size=data_size[::-1], 
                     mode='nearest'
                 ).squeeze(0)
-                new_batch.append((transform_image(image), resized_label, class_label))
+                
+                # Resize the image tensor if needed
+                resized_image = torch.nn.functional.interpolate(
+                    image.unsqueeze(0), 
+                    size=data_size[::-1], 
+                    mode='bilinear',
+                    align_corners=False
+                ).squeeze(0)
+                
+                new_batch.append((resized_image, resized_label, class_label))
             else:
-                new_batch.append((transform_image(image), label, class_label))
+                new_batch.append((image, label, class_label))
         else:
-            # Label is still an image (PIL), process it
-            new_batch.append((transform_image(image), transform_label(label), class_label))
+            # One or both are still PIL images (shouldn't happen after __getitem__)
+            transform_image = transforms.Compose([
+                transforms.Resize(data_size[::-1]),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ])
+            transform_label = transforms.Compose([
+                transforms.Resize(data_size[::-1]),
+                transforms.ToTensor(),
+            ])
+            
+            # Convert any PIL images to tensors
+            if not isinstance(image, torch.Tensor):
+                image = transform_image(image)
+            if not isinstance(label, torch.Tensor):
+                label = transform_label(label)
+                
+            new_batch.append((image, label, class_label))
             
     return data._utils.collate.default_collate(new_batch)

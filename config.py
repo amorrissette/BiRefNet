@@ -24,6 +24,10 @@ class Config():
         self.color_channel_map = {}   # Dict mapping RGB colors to output channels (if rgb_labels=True)
                                       # Format: {(R,G,B): channel_index, ...}, where channel_index is 0-based
         self.color_tolerance = 10     # Tolerance for matching colors in RGB labels (0 for exact matching)
+        
+        # Thermal heatmap settings
+        self.use_thermal_json = True  # Whether to use thermal JSON data for heatmap generation
+        self.heatmap_sigma_factor = 0.3  # Sigma factor for Gaussian blur (relative to radius)
         self.testsets = {
             'Thermal': 'Thermal-TE',
             # Benchmarks
