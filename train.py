@@ -31,7 +31,7 @@ parser.add_argument('--ckpt_dir', default='ckpt/tmp', help='Temporary folder')
 parser.add_argument('--dist', default=False, type=lambda x: x == 'True')
 parser.add_argument('--use_accelerate', action='store_true', help='`accelerate launch --multi_gpu train.py --use_accelerate`. Use accelerate for training, good for FP16/BF16/...')
 parser.add_argument('--wandb', default=False, type=lambda x: x == 'True', help='Enable Weights & Biases logging')
-parser.add_argument('--wandb_project', default=None, type=str, help='W&B project name')
+parser.add_argument('--wandb_project', default='Thermalts', type=str, help='W&B project name')
 parser.add_argument('--wandb_entity', default=None, type=str, help='W&B entity (team) name')
 args = parser.parse_args()
 
@@ -322,7 +322,7 @@ class Trainer:
                     gts = batch[1].to(device)
                 
                 # Get predictions
-                scaled_preds, _ = self.model(inputs)
+                scaled_preds = self.model(inputs)
                 if isinstance(scaled_preds, tuple) and config.out_ref:
                     scaled_preds = scaled_preds[1]  # Extract actual predictions if output includes references
                 

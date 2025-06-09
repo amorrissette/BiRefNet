@@ -75,7 +75,7 @@ class Config():
         self.dec_blk = ['BasicDecBlk', 'ResBlk'][0]
 
         # TRAINING settings
-        self.batch_size = 2
+        self.batch_size = 3
         self.validate_during_training = True          # Whether to run validation during training
         self.validation_interval = 1                   # Run validation every N epochs
         self.validation_set = {                       # Which validation set to use during training
@@ -91,7 +91,7 @@ class Config():
         self.finetune_last_epochs = [
             0,
             {
-                'Thermal': -20,
+                'Thermal': -50,
                 'DIS5K': -40,
                 'COD': -20,
                 'HRSOD': -20,
@@ -100,7 +100,7 @@ class Config():
                 'Matting': -20,
             }[self.task]
         ][1]    # choose 0 to skip
-        self.lr = (1e-4 if 'DIS5K' in self.task else 1e-5) * math.sqrt(self.batch_size / 4)     # DIS needs high lr to converge faster. Adapt the lr linearly
+        self.lr = (1e-4 if 'DIS5K' in self.task else 2e-4) * math.sqrt(self.batch_size / 4)     # DIS needs high lr to converge faster. Adapt the lr linearly
         self.num_workers = max(4, self.batch_size)          # will be decrease to min(it, batch_size) at the initialization of the data_loader
 
         # Backbone settings
@@ -211,14 +211,15 @@ class Config():
 
         self.batch_size_valid = 1
         self.rand_seed = 7
-        # run_sh_file = [f for f in os.listdir('.') if 'train.sh' == f] + [os.path.join('..', f) for f in os.listdir('..') if 'train.sh' == f]
-        # print(run_sh_file)
-        # if run_sh_file:
-        #     with open(run_sh_file[0], 'r') as f:
-        #         lines = f.readlines()
-        #         self.save_last = int([l.strip() for l in lines if "'{}')".format(self.task) in l and 'val_last=' in l][0].split('val_last=')[-1].split()[0])
-        #         self.save_step = int([l.strip() for l in lines if "'{}')".format(self.task) in l and 'step=' in l][0].split('step=')[-1].split()[0])
-
+        run_sh_file = [f for f in os.listdir('.') if 'train.sh' == f] + [os.path.join('..', f) for f in os.listdir('..') if 'train.sh' == f]
+        if 0: # run_sh_file:
+            with open(run_sh_file[0], 'r') as f:
+                lines = f.readlines()
+                self.save_last = int([l.strip() for l in lines if "'{}')".format(self.task) in l and 'val_last=' in l][0].split('val_last=')[-1].split()[0])
+                self.save_step = int([l.strip() for l in lines if "'{}')".format(self.task) in l and 'step=' in l][0].split('step=')[-1].split()[0])
+        else:
+            self.save_last = 50
+            self.save_step = 5
 
 # Return task for choosing settings in shell scripts.
 if __name__ == '__main__':
