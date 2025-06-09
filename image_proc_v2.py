@@ -4,6 +4,49 @@ import numpy as np
 import cv2
 
 
+def preprocess_label_multiclass(label, type='skin'):
+    
+    # Initial label prep assuming it is loaded as image
+    label = np.array(label)
+    label = 255 - label
+    
+    if type == 'skin':
+        # apply threshold
+        skin_threshold = 55
+        label[(label <= (skin_threshold - 5))] = 0
+        label[(label >= (skin_threshold + 5))] = 0
+        label[(label > (skin_threshold - 5)) & (label < (skin_threshold + 5))] = 255
+    elif type == 'body':
+        # Apply full body threshold
+        body_threshold = 20
+        label[label > body_threshold] = 255
+        label[label <= body_threshold] = 0
+    elif type == 'clothes':
+        # Apply clothes threshold
+        clothes_threshold = 160
+        label[(label <= (clothes_threshold - 5))] = 0
+        label[(label >= (clothes_threshold + 5))] = 0
+        label[(label > (clothes_threshold - 5)) & (label < (clothes_threshold + 5))] = 255
+    elif type == 'multi':
+        classes = [55, 160, 108, 85, 0] # skin, clothes, hair, object, background
+        # For each label value write to a new class
+        # 160 - clothes, 55 - skin, 108 - hair, 0 - background, 85 - object
+        labels = np.zeros((*label.shape, 5), dtype=np.uint8)
+        for i, color in enumerate(classes):
+            lower_bound = max(0, color - 5)
+            upper_bound = min(255, color + 5)
+            labels[:, :, i] = np.where((label >= lower_bound) & (label <= upper_bound), 255, 0).astype(np.uint8)
+
+        return labels
+    else:
+        label = 255 - label
+        
+    # Convert back to image
+    label = Image.fromarray(label).convert('L')
+
+
+    return label
+
 def refine_foreground(image, mask, r=90):
     if mask.size != image.size:
         mask = mask.resize(image.size)
