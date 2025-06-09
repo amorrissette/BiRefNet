@@ -15,7 +15,7 @@ class Config():
         self.wandb_entity = None                # W&B entity (team) name, set to None for default
 
         # TASK settings
-        self.task = ['DIS5K', 'COD', 'HRSOD', 'General', 'General-2K', 'Matting'][0]
+        self.task = ['DIS5K', 'COD', 'HRSOD', 'General', 'General-2K', 'Matting', 'Human'][6]
         
         # IMAGE settings
         self.grayscale_input = False  # Whether to use grayscale input images
@@ -33,6 +33,7 @@ class Config():
             'General': ','.join(['DIS-VD', 'TE-P3M-500-NP']),
             'General-2K': ','.join(['DIS-VD', 'TE-P3M-500-NP']),
             'Matting': ','.join(['TE-P3M-500-NP', 'TE-AM-2k']),
+            'Human': 'Human-TE',
         }[self.task]
         datasets_all = '+'.join([ds for ds in (os.listdir(os.path.join(self.data_root_dir, self.task)) if os.path.isdir(os.path.join(self.data_root_dir, self.task)) else []) if ds not in self.testsets.split(',')])
         self.training_set = {
@@ -42,6 +43,7 @@ class Config():
             'General': datasets_all,
             'General-2K': datasets_all,
             'Matting': datasets_all,
+            'Human': 'Human-TR'
         }[self.task]
 
         # Data settings
@@ -50,8 +52,8 @@ class Config():
         self.background_color_synthesis = False             # whether to use pure bg color to replace the original backgrounds.
 
         # Faster-Training settings
-        self.load_all = False and self.dynamic_size is None   # Turn it on/off by your case. It may consume a lot of CPU memory. And for multi-GPU (N), it would cost N times the CPU memory to load the data.
-        self.compile = True                             # 1. Trigger CPU memory leak in some extend, which is an inherent problem of PyTorch.
+        self.load_all = True # False and self.dynamic_size is None   # Turn it on/off by your case. It may consume a lot of CPU memory. And for multi-GPU (N), it would cost N times the CPU memory to load the data.
+        self.compile = False                             # 1. Trigger CPU memory leak in some extend, which is an inherent problem of PyTorch.
                                                         #   Machines with > 70GB CPU memory can run the whole training on DIS5K with default setting.
                                                         # 2. Higher PyTorch version may fix it: https://github.com/pytorch/pytorch/issues/119607.
                                                         # 3. But compile in 2.0.1 < Pytorch < 2.5.0 seems to bring no acceleration for training.
@@ -69,7 +71,7 @@ class Config():
         self.dec_blk = ['BasicDecBlk', 'ResBlk'][0]
 
         # TRAINING settings
-        self.batch_size = 4
+        self.batch_size = 3
         self.validate_during_training = True          # Whether to run validation during training
         self.validation_interval = 1                   # Run validation every N epochs
         self.validation_set = {                       # Which validation set to use during training
@@ -79,6 +81,7 @@ class Config():
             'General': 'DIS-VD',                     # Use first test set for General
             'General-2K': 'DIS-VD',                  # Use first test set for General-2K
             'Matting': 'TE-P3M-500-NP',             # Use first test set for Matting
+            'Human': 'Human-TE'
         }[self.task]
         self.validation_metrics = ['S', 'MAE']        # Metrics to calculate during validation
         self.finetune_last_epochs = [
@@ -102,7 +105,7 @@ class Config():
             'swin_v1_b', 'swin_v1_l',               # 5-bs9, 6-bs4
             'pvt_v2_b0', 'pvt_v2_b1',               # 7, 8
             'pvt_v2_b2', 'pvt_v2_b5',               # 9-bs10, 10-bs5
-        ][6]
+        ][3]
         self.lateral_channels_in_collection = {
             'vgg16': [512, 256, 128, 64], 'vgg16bn': [512, 256, 128, 64], 'resnet50': [1024, 512, 256, 64],
             'pvt_v2_b2': [512, 320, 128, 64], 'pvt_v2_b5': [512, 320, 128, 64],
